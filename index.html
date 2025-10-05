@@ -77,6 +77,7 @@ button {
 button:hover { background-color: var(--subtle); color: var(--dark); }
 
 #session-button { position: fixed; bottom: 20px; left: 20px; z-index: 10; }
+#fullscreen-button { position: fixed; top: 20px; right: 20px; z-index: 10; }
 #session-menu {
   position: fixed; top: 50%; left: 50%;
   transform: translate(-50%, -50%) scale(0.1);
@@ -115,7 +116,7 @@ button:hover { background-color: var(--subtle); color: var(--dark); }
 }
 .delete-popup.show { opacity: 1; }
 
-.running .ui-element, .running #session-button { opacity: 0; pointer-events: none; }
+.running .ui-element, .running #session-button, .running #fullscreen-button { opacity: 0; pointer-events: none; }
 .running #timer-display { font-size: 10em; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 </style>
 </head>
@@ -128,6 +129,7 @@ button:hover { background-color: var(--subtle); color: var(--dark); }
   </div>
 </div>
 <button id="session-button">Sessions ▾</button>
+<button id="fullscreen-button">⛶</button>
 <div id="session-menu"></div>
 <div class="delete-popup" id="popup"></div>
 <script>
@@ -140,6 +142,7 @@ const sessionButton=document.getElementById('session-button');
 const sessionMenu=document.getElementById('session-menu');
 const sessionName=document.getElementById('session-name');
 const popup=document.getElementById('popup');
+const fullscreenButton=document.getElementById('fullscreen-button');
 
 function key(){return`records_session_${currentSession}`;}
 function load(){return JSON.parse(localStorage.getItem(key()))||[];}
@@ -217,6 +220,7 @@ let holdActive=false, holdTimeout;
 function isTimerArea(target){
   return !target.closest('#session-menu') &&
          !target.closest('#session-button') &&
+         !target.closest('#fullscreen-button') &&
          !target.closest('#records-list');
 }
 
@@ -468,6 +472,30 @@ document.addEventListener('click', e=>{
 if(!localStorage.getItem('session_ids')){
   localStorage.setItem('session_ids', JSON.stringify([1,2,3,4,5,6,7,8,9,10]));
 }
+
+// Fullscreen functionality
+function toggleFullscreen(){
+  if(!document.fullscreenElement){
+    document.documentElement.requestFullscreen().catch(err=>{
+      showPopup('Fullscreen not supported');
+    });
+    fullscreenButton.textContent='✕';
+  } else {
+    document.exitFullscreen();
+    fullscreenButton.textContent='⛶';
+  }
+}
+
+fullscreenButton.onclick=toggleFullscreen;
+
+// Update button text when fullscreen changes
+document.addEventListener('fullscreenchange', ()=>{
+  if(document.fullscreenElement){
+    fullscreenButton.textContent='✕';
+  } else {
+    fullscreenButton.textContent='⛶';
+  }
+});
 
 render();
 </script>
