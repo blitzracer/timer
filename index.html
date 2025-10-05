@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hold-Release Timer (Fixed)</title>
+<style>
+:root {
+  --dark: #1A237E;
+  --accent: #FFFFFF;
+  --subtle: #90CAF9;
+  --ready: #4CAF50;
+  --running: #009688;
+  --transition: 0.4s;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: var(--dark);
+  color: var(--accent);
+  touch-action: manipulation;
+  transition: background-color var(--transition);
+}
+.ready { background-color: var(--ready); }
+.running { background-color: var(--running); }
+.container { text-align: center; width: 90%; max-width: 400px; }
+
+#timer-display {
+  font-size: 4em;
+  font-weight: bold;
+  margin: 20px 0;
+  transition: font-size var(--transition), transform var(--transition);
+}
+
+#records-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  max-height: 250px;
+  overflow-y: auto;
+  text-align: left;
+  background-color: rgba(0,0,0,0.15);
+  border-radius: 8px;
+  transition: opacity var(--transition);
+}
+#records-list li {
+  padding: 8px 15px;
+  display: flex;
+  justify-content: space-between;
+  font-family: Consolas, monospace;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  align-items: center;
+}
+#records-list li:last-child { border-bottom: none; }
+
+button {
+  cursor: pointer;
+  background: none;
+  border: 2px solid var(--subtle);
+  color: var(--subtle);
+  border-radius: 20px;
+  padding: 8px 15px;
+  transition: 0.3s;
+  -webkit-tap-highlight-color: transparent;
+}
+button:hover { background-color: var(--subtle); color: var(--dark); }
+
+#session-button { position: fixed; bottom: 20px; left: 20px; z-index: 10; }
+#session-menu {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(0.1);
+  background-color: var(--dark);
+  border: 2px solid var(--subtle);
+  border-radius: 10px;
+  padding: 10px;
+  z-index: 20;
+  max-height: 80vh;
+  max-width: 90vw;
+  overflow-y: auto;
+  opacity: 0; visibility: hidden;
+  transition: opacity 0.3s, transform 0.3s;
+}
+#session-menu.visible { opacity: 1; visibility: visible; transform: translate(-50%, -50%) scale(1); }
+
+.session-header { display: flex; justify-content: space-between; align-items: center; color: var(--subtle); margin-bottom: 10px; }
+.session-item { padding: 10px 20px; margin: 5px 0; cursor: pointer; border-radius: 5px; transition: background-color 0.2s; display: flex; justify-content: space-between; align-items: center; }
+.session-item:hover { background-color: rgba(255,255,255,0.1); }
+.session-item.active { background-color: var(--subtle); color: var(--dark); font-weight: bold; }
+.session-item.selected { background-color: rgba(144,202,249,0.4); }
+
+.session-menu-btn { background: none; border: none; color: var(--subtle); font-size: 1.5em; cursor: pointer; }
+
+.session-actions { display: flex; gap: 10px; margin-top: 10px; justify-content: space-around; }
+.session-actions button { border-radius: 10px; font-weight: bold; }
+
+.delete-popup {
+  position: fixed; bottom: 20px; left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--subtle); color: var(--dark);
+  padding: 10px 20px; border-radius: 20px;
+  font-weight: bold;
+  opacity: 0; transition: opacity 0.4s;
+  z-index: 100;
+}
+.delete-popup.show { opacity: 1; }
+
+.running .ui-element, .running #session-button { opacity: 0; pointer-events: none; }
+.running #timer-display { font-size: 10em; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <div id="timer-display">0.000</div>
+  <div class="ui-element" id="records-container">
+    <h2>⏱️ Records (<span id="session-name">Session 1</span>)</h2>
+    <ul id="records-list"></ul>
+  </div>
+</div>
+<button id="session-button">Sessions ▾</button>
+<div id="session-menu"></div>
+<div class="delete-popup" id="popup"></div>
+<script>
+let timerState='STOPPED', startTime=0, timerInterval=null, currentSession=1;
+let selecting=false, selectedSessions=new Set();
+
+const body=document.body, display=document.getElementById('timer-display');
+const recordsList=document.getElementById('records-list');
+const sessionButton=document.getElementById('session-button');
+const sessionMenu=document.getElementById('session-menu');
+const sessionName=document.getElementById('session-name');
+const popup=document.getElementById('popup');
+
+function key(){return`records_session_${currentSession}`;}
+function load(){return JSON.parse(localStorage.getItem(key()))||[];}
+function save(r){localStorage.setItem(key(),JSON.stringify(r));}
+function updateDisplay(ms){
+  const decimals = timerState === 'RUNNING' ? 1 : 3;
+  display.textContent=(ms/1000).toFixed(decimals);
+}
+
+function render(){
+  const rec=load();
+  recordsList.innerHTML='';
+  const sessions = JSON.parse(localStorage.getItem('session_names') || '{}');
+  sessionName.textContent=sessions[currentSession] || `Session ${currentSession}`;
+  rec.slice().reverse().forEach((t,i)=>{
+    const li=document.createElement('li');
+    li.innerHTML=`<span>#${rec.length-i}</span><span>${t}s</span>`;
+    const dots=document.createElement('span');
+    dots.textContent='⋮';
+    dots.style.cssText='cursor:pointer;padding:0 10px;font-size:1.2em;';
+    dots.onclick=e=>{
+      e.stopPropagation();
+      // Create delete button
+      const deleteBtn=document.createElement('button');
+      deleteBtn.textContent='Delete';
+      deleteBtn.style.cssText='padding:4px 10px;font-size:0.8em;margin-left:10px;';
+      deleteBtn.onclick=()=>{
+        rec.splice(rec.length-1-i,1); 
+        save(rec); 
+        render();
+        showPopup('Record deleted');
+      };
+      // Replace dots with delete button
+      dots.replaceWith(deleteBtn);
+    };
+    li.appendChild(dots);
+    recordsList.appendChild(li);
+  });
+}
+
+function showPopup(msg){
+  popup.textContent=msg;
+  popup.classList.add('show');
+  setTimeout(()=>popup.classList.remove('show'),1200);
+}
+
+function setState(s){
+  timerState = s;
+  body.className = '';
+  if(s==='READY') body.classList.add('ready');
+  if(s==='RUNNING') body.classList.add('running');
+}
+
+function startTimer(){
+  setState('RUNNING');
+  startTime=Date.now();
+  timerInterval=setInterval(()=>updateDisplay(Date.now()-startTime),10);
+}
+
+function stopTimer(){
+  clearInterval(timerInterval);
+  timerInterval=null;
+  if(timerState==='RUNNING'){
+    const rec=load();
+    rec.push(display.textContent);
+    save(rec);
+  }
+  setState('STOPPED');
+  updateDisplay(0);
+  render();
+}
+
+// Hold-release logic
+let holdActive=false, holdTimeout;
+function isTimerArea(target){
+  return !target.closest('#session-menu') &&
+         !target.closest('#session-button') &&
+         !target.closest('#records-list');
+}
+
+function startHold(e){
+  if(!isTimerArea(e.target)) return;
+  if(timerState !== 'STOPPED') return;
+  holdActive=true;
+  holdTimeout=setTimeout(()=>{
+    if(holdActive) setState('READY');
+  },50);
+}
+
+function endHold(e){
+  if(!isTimerArea(e.target)){
+    holdActive=false; clearTimeout(holdTimeout); return;
+  }
+  if(timerState==='READY') startTimer();
+  else if(timerState==='RUNNING') stopTimer();
+  holdActive=false; clearTimeout(holdTimeout);
+}
+
+// Tap/Click functionality
+let tapStartTime = 0;
+let lastActionTime = 0;
+const TAP_THRESHOLD = 200; // milliseconds to distinguish tap from hold
+const ACTION_COOLDOWN = 100; // cooldown to prevent double triggers
+
+function handlePointerDown(e){
+  if(!isTimerArea(e.target)) return;
+  tapStartTime = Date.now();
+}
+
+function handlePointerUp(e){
+  if(!isTimerArea(e.target)) return;
+  
+  const now = Date.now();
+  const tapDuration = now - tapStartTime;
+  
+  // Prevent double triggers
+  if(now - lastActionTime < ACTION_COOLDOWN) return;
+  
+  // If it was a quick tap (not a hold) and we're not in READY state
+  if(tapDuration < TAP_THRESHOLD && timerState !== 'READY'){
+    lastActionTime = now;
+    
+    if(timerState === 'STOPPED'){
+      startTimer();
+    } else if(timerState === 'RUNNING'){
+      stopTimer();
+    }
+    return; // Exit early to prevent hold logic from running
+  }
+}
+
+// Event listeners (no duplicates)
+document.addEventListener('mousedown', e=>{
+  handlePointerDown(e);
+  startHold(e);
+});
+
+document.addEventListener('mouseup', e=>{
+  const tapDuration = Date.now() - tapStartTime;
+  if(tapDuration >= TAP_THRESHOLD){ // Only process hold release if it was actually held
+    endHold(e);
+  } else {
+    handlePointerUp(e);
+    // Cancel hold if it was a tap
+    holdActive=false; 
+    clearTimeout(holdTimeout);
+  }
+});
+
+document.addEventListener('touchstart', e=>{
+  handlePointerDown(e);
+  startHold(e);
+}, {passive:false});
+
+document.addEventListener('touchend', e=>{
+  const tapDuration = Date.now() - tapStartTime;
+  if(tapDuration >= TAP_THRESHOLD){
+    endHold(e);
+  } else {
+    handlePointerUp(e);
+    holdActive=false;
+    clearTimeout(holdTimeout);
+  }
+});
+
+function toggleMenu(e){
+  e.stopPropagation();
+  if(timerState!=='STOPPED') return;
+  if(sessionMenu.classList.contains('visible')) hideMenu();
+  else{ genSessions(); sessionMenu.classList.add('visible'); }
+}
+function hideMenu(){ sessionMenu.classList.remove('visible'); }
+function menuTarget(t){ return t.closest('#session-menu') || t.id==='session-button'; }
+
+function genSessions(){
+  sessionMenu.innerHTML='';
+  const sessions = JSON.parse(localStorage.getItem('session_names') || '{}');
+  const sessionIds = JSON.parse(localStorage.getItem('session_ids') || '[1,2,3,4,5,6,7,8,9,10]');
+  
+  const header=document.createElement('div');
+  header.className='session-header';
+  header.innerHTML=`<h3>Sessions</h3><button class="session-menu-btn" id="session-menu-dots">⋮</button>`;
+  sessionMenu.appendChild(header);
+  
+  // Options menu (initially hidden)
+  const optionsMenu = document.createElement('div');
+  optionsMenu.id='options-menu';
+  optionsMenu.style.cssText='display:none;margin:10px 0;';
+  
+  const createBtn = document.createElement('button');
+  createBtn.textContent='Create';
+  createBtn.style.cssText='margin:5px;display:block;width:90%;';
+  createBtn.onclick=e=>{
+    e.stopPropagation();
+    const name = prompt('Enter session name:');
+    if(name && name.trim()){
+      const newId = Math.max(...sessionIds, 0) + 1;
+      sessionIds.push(newId);
+      sessions[newId] = name.trim();
+      localStorage.setItem('session_names', JSON.stringify(sessions));
+      localStorage.setItem('session_ids', JSON.stringify(sessionIds));
+      currentSession = newId;
+      hideMenu();
+      render();
+      showPopup('Session created');
+    }
+  };
+  
+  const selectBtn = document.createElement('button');
+  selectBtn.textContent='Select';
+  selectBtn.style.cssText='margin:5px;display:block;width:90%;';
+  selectBtn.onclick=e=>{
+    e.stopPropagation();
+    selecting=true;
+    selectedSessions.clear();
+    optionsMenu.style.display='none';
+    genSessions();
+  };
+  
+  optionsMenu.appendChild(createBtn);
+  optionsMenu.appendChild(selectBtn);
+  sessionMenu.appendChild(optionsMenu);
+  
+  // Session list
+  sessionIds.forEach(i=>{
+    const div=document.createElement('div');
+    div.className='session-item'+(i===currentSession?' active':'');
+    if(selecting && selectedSessions.has(i)) div.classList.add('selected');
+    div.innerHTML=`<span>${sessions[i] || `Session ${i}`}</span>`;
+    div.onclick=e=>{
+      e.stopPropagation();
+      if(selecting){
+        if(selectedSessions.has(i)) selectedSessions.delete(i);
+        else selectedSessions.add(i);
+        genSessions();
+      } else {
+        currentSession=i; hideMenu(); render();
+      }
+    };
+    sessionMenu.appendChild(div);
+  });
+  
+  if(selecting){
+    const actions=document.createElement('div');
+    actions.className='session-actions';
+    
+    const renameBtn=document.createElement('button');
+    renameBtn.textContent='Rename';
+    renameBtn.onclick=e=>{
+      e.stopPropagation();
+      if(selectedSessions.size !== 1){
+        showPopup('Select exactly one session');
+        return;
+      }
+      const id = Array.from(selectedSessions)[0];
+      const newName = prompt('Enter new name:', sessions[id] || `Session ${id}`);
+      if(newName && newName.trim()){
+        sessions[id] = newName.trim();
+        localStorage.setItem('session_names', JSON.stringify(sessions));
+        showPopup('Session renamed');
+        render();
+        genSessions();
+      }
+    };
+    
+    const deleteBtn=document.createElement('button');
+    deleteBtn.textContent='Delete';
+    deleteBtn.onclick=e=>{
+      e.stopPropagation();
+      if(selectedSessions.size === 0){
+        showPopup('Select sessions first');
+        return;
+      }
+      const count=selectedSessions.size;
+      selectedSessions.forEach(id=>{
+        localStorage.removeItem(`records_session_${id}`);
+        delete sessions[id];
+        const idx = sessionIds.indexOf(id);
+        if(idx > -1) sessionIds.splice(idx, 1);
+      });
+      if(selectedSessions.has(currentSession)){
+        currentSession = sessionIds[0] || 1;
+      }
+      localStorage.setItem('session_names', JSON.stringify(sessions));
+      localStorage.setItem('session_ids', JSON.stringify(sessionIds));
+      selecting=false; 
+      selectedSessions.clear(); 
+      hideMenu();
+      render();
+      showPopup(count===1?'Session deleted':`${count} sessions deleted`);
+    };
+    
+    const cancelBtn=document.createElement('button');
+    cancelBtn.textContent='Cancel';
+    cancelBtn.onclick=e=>{
+      e.stopPropagation();
+      selecting=false;
+      selectedSessions.clear();
+      genSessions();
+    };
+    
+    actions.append(renameBtn, deleteBtn, cancelBtn);
+    sessionMenu.appendChild(actions);
+  }
+  
+  // Attach 3-dots handler
+  setTimeout(()=>{
+    const dotsBtn = document.getElementById('session-menu-dots');
+    if(dotsBtn){
+      dotsBtn.onclick = e => {
+        e.stopPropagation();
+        const menu = document.getElementById('options-menu');
+        if(menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+      };
+    }
+  }, 0);
+}
+
+sessionButton.onclick=toggleMenu;
+sessionMenu.onclick=e=>e.stopPropagation();
+document.addEventListener('click', e=>{
+  if(sessionMenu.classList.contains('visible') && !menuTarget(e.target)) hideMenu();
+});
+
+// Initialize default session
+if(!localStorage.getItem('session_ids')){
+  localStorage.setItem('session_ids', JSON.stringify([1,2,3,4,5,6,7,8,9,10]));
+}
+
+render();
+</script>
+</body>
+</html>
