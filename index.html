@@ -230,12 +230,14 @@ function startHold(e){
   holdActive=true;
   holdTimeout=setTimeout(()=>{
     if(holdActive) setState('READY');
-  },50);
+  },200);
 }
 
 function endHold(e){
   if(!isTimerArea(e.target)){
-    holdActive=false; clearTimeout(holdTimeout); return;
+    holdActive=false; clearTimeout(holdTimeout); 
+    if(timerState==='READY') setState('STOPPED');
+    return;
   }
   if(timerState==='READY') startTimer();
   else if(timerState==='RUNNING') stopTimer();
@@ -475,13 +477,19 @@ if(!localStorage.getItem('session_ids')){
 
 // Fullscreen functionality
 function toggleFullscreen(){
-  if(!document.fullscreenElement){
+  const isFullscreen = localStorage.getItem('fullscreen_mode') === 'true';
+  
+  if(!isFullscreen){
     document.documentElement.requestFullscreen().catch(err=>{
       showPopup('Fullscreen not supported');
     });
+    localStorage.setItem('fullscreen_mode', 'true');
     fullscreenButton.textContent='✕';
   } else {
-    document.exitFullscreen();
+    if(document.fullscreenElement){
+      document.exitFullscreen();
+    }
+    localStorage.setItem('fullscreen_mode', 'false');
     fullscreenButton.textContent='⛶';
   }
 }
@@ -492,8 +500,20 @@ fullscreenButton.onclick=toggleFullscreen;
 document.addEventListener('fullscreenchange', ()=>{
   if(document.fullscreenElement){
     fullscreenButton.textContent='✕';
+    localStorage.setItem('fullscreen_mode', 'true');
   } else {
     fullscreenButton.textContent='⛶';
+    localStorage.setItem('fullscreen_mode', 'false');
+  }
+});
+
+// Auto-enable fullscreen on load if saved
+window.addEventListener('load', ()=>{
+  const isFullscreen = localStorage.getItem('fullscreen_mode') === 'true';
+  if(isFullscreen){
+    document.documentElement.requestFullscreen().catch(err=>{
+      localStorage.setItem('fullscreen_mode', 'false');
+    });
   }
 });
 
