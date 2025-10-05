@@ -507,15 +507,28 @@ document.addEventListener('fullscreenchange', ()=>{
   }
 });
 
-// Auto-enable fullscreen on load if saved
-window.addEventListener('load', ()=>{
-  const isFullscreen = localStorage.getItem('fullscreen_mode') === 'true';
-  if(isFullscreen){
-    document.documentElement.requestFullscreen().catch(err=>{
-      localStorage.setItem('fullscreen_mode', 'false');
-    });
+// Auto-enable fullscreen on first interaction (browsers require user gesture)
+let fullscreenAttempted = false;
+function attemptFullscreen(){
+  if(!fullscreenAttempted){
+    fullscreenAttempted = true;
+    const savedPreference = localStorage.getItem('fullscreen_mode');
+    // If no preference saved, default to fullscreen on
+    if(savedPreference === null){
+      localStorage.setItem('fullscreen_mode', 'true');
+    }
+    if(localStorage.getItem('fullscreen_mode') === 'true'){
+      document.documentElement.requestFullscreen().catch(err=>{
+        console.log('Fullscreen requires user interaction first');
+      });
+    }
   }
-});
+}
+
+// Try to enable fullscreen on any user interaction
+document.addEventListener('click', attemptFullscreen, {once: true});
+document.addEventListener('touchstart', attemptFullscreen, {once: true});
+document.addEventListener('keydown', attemptFullscreen, {once: true});
 
 render();
 </script>
